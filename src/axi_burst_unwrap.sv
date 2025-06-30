@@ -484,7 +484,7 @@ module axi_burst_unwrap_ax_chan #(
     unique case (state_q)
       Idle: begin
         if (ax_valid_i && &cnt_alloc_gnt) begin
-          if (ax_i.burst == axi_pkg::BURST_WRAP && ax_i.addr != wrap_boundary) begin // Splitting required.
+          if (ax_i.burst == axi_pkg::BURST_WRAP && axi_pkg::aligned_addr(ax_i.addr, ax_i.size) != wrap_boundary) begin // Splitting required.
             // Store Ax, allocate a counter, and acknowledge upstream.
             ax_d          = ax_i;
             ax_d.burst    = axi_pkg::BURST_INCR;
@@ -492,9 +492,9 @@ module axi_burst_unwrap_ax_chan #(
             // Try to feed first burst through.
             ax_o       = ax_d;
             // First (this) incr burst from addr to wrap boundary + container size
-            ax_o.len   = ((wrap_boundary + container_size - ax_i.addr) >> ax_i.size) - 1;
+            ax_o.len   = ((wrap_boundary + container_size - axi_pkg::aligned_addr(ax_i.addr, ax_i.size)) >> ax_i.size) - 1;
             // Next incr burst from wrap boundary to addr
-            ax_d.len   = ((ax_i.addr - wrap_boundary) >> ax_i.size) - 1;
+            ax_d.len   = ((axi_pkg::aligned_addr(ax_i.addr, ax_i.size) - wrap_boundary) >> ax_i.size) - 1;
             ax_d.addr  = wrap_boundary;
             ax_valid_o = 1'b1;
             if (ax_ready_i) begin
@@ -505,6 +505,7 @@ module axi_burst_unwrap_ax_chan #(
             end
           end else begin // No splitting required -> feed through.
             ax_o       = ax_i;
+            ax_o.addr = axi_pkg::aligned_addr(ax_i.addr, ax_i.size);
             // A wrapping burst starting on the wrap boundary maps directly to an incrementing burst.
             if (ax_i.burst == axi_pkg::BURST_WRAP) begin
               ax_o.burst = axi_pkg::BURST_INCR;
