@@ -72,7 +72,7 @@ module tb_axi_to_mem_banked #(
     .TRAFFIC_SHAPING      (    0 ),
     .AXI_EXCLS            ( 1'b0 ),
     .AXI_ATOPS            ( 1'b0 ),
-    .AXI_BURST_FIXED      ( 1'b0 ),
+    .AXI_BURST_FIXED      ( 1'b1 ),
     .AXI_BURST_INCR       ( 1'b1 ),
     .AXI_BURST_WRAP       ( 1'b0 )
   ) axi_rand_master_t;
@@ -236,6 +236,8 @@ module tb_axi_to_mem_banked #(
     automatic longint      rc_cnt     = 0;
     automatic longint      w_cnt      = 0;
     automatic longint      r_cnt      = 0;
+    automatic longint unsigned aw_burst_count [4] = '{default: 0};
+    automatic longint unsigned ar_burst_count [4] = '{default: 0};
 
     automatic longint      busy_cnt;
     automatic longint      dut_busy_cnt [TbNumBanks];
@@ -264,6 +266,10 @@ module tb_axi_to_mem_banked #(
       @(posedge clk);
 
       #TestTime;
+      // Count accepted bursts once, regardless of address-channel stalls.
+      if (aw_beat) aw_burst_count[mem_axi.aw_burst]++;
+      if (ar_beat) ar_burst_count[mem_axi.ar_burst]++;
+
       // determine the first valid of an AW transaction
       if (mem_axi.aw_valid) begin
         if (aw_new) begin
@@ -330,12 +336,18 @@ module tb_axi_to_mem_banked #(
         $display("Statistics:");
         $display("###############################################################################");
         $display("Writes:");
+        $display("Bursts: FIXED=%0d INCR=%0d WRAP=%0d RESERVED=%0d",
+                 aw_burst_count[axi_pkg::BURST_FIXED], aw_burst_count[axi_pkg::BURST_INCR],
+                 aw_burst_count[axi_pkg::BURST_WRAP], aw_burst_count[2'b11]);
         $display("Cycles Open write tnx: %0d", wc_cnt);
         $display("Write beat count:      %0d", w_cnt);
         $display("Write utilization:     %0f", real'(w_cnt) / real'(wc_cnt) * 100);
         axi_busy_percent += real'(w_cnt) / real'(wc_cnt) * 100;
                 $display("###############################################################################");
         $display("Reads:");
+        $display("Bursts: FIXED=%0d INCR=%0d WRAP=%0d RESERVED=%0d",
+                 ar_burst_count[axi_pkg::BURST_FIXED], ar_burst_count[axi_pkg::BURST_INCR],
+                 ar_burst_count[axi_pkg::BURST_WRAP], ar_burst_count[2'b11]);
         $display("Cycles Open read tnx:  %0d", rc_cnt);
         $display("Read beat count:       %0d", r_cnt);
         $display("Read utilization:      %0f", real'(r_cnt) / real'(rc_cnt) * 100);

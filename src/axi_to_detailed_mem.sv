@@ -127,6 +127,7 @@ module axi_to_detailed_mem #(
     logic             last;
     axi_pkg::qos_t    qos;
     axi_pkg::size_t   size;
+    axi_pkg::burst_t  burst;
     logic             write;
     mem_user_t        user;
     axi_pkg::cache_t  cache;
@@ -179,7 +180,9 @@ module axi_to_detailed_mem #(
     if (r_cnt_q > '0) begin
       rd_meta_d.last = (r_cnt_q == 8'd1);
       rd_meta        = rd_meta_d;
-      rd_meta.addr   = rd_meta_q.addr + axi_pkg::num_bytes(rd_meta_q.size);
+      if (rd_meta_q.burst == axi_pkg::BURST_INCR) begin
+        rd_meta.addr = rd_meta_q.addr + axi_pkg::num_bytes(rd_meta_q.size);
+      end
       rd_valid       = 1'b1;
       if (rd_ready) begin
         r_cnt_d--;
@@ -196,12 +199,18 @@ module axi_to_detailed_mem #(
         last:   (axi_req_i.ar.len == '0),
         qos:    axi_req_i.ar.qos,
         size:   axi_req_i.ar.size,
+        burst:  axi_req_i.ar.burst,
         write:  1'b0,
         user:   axi_req_i.ar.user,
         cache:  axi_req_i.ar.cache,
         prot:   axi_req_i.ar.prot,
         region: axi_req_i.ar.region
       };
+      // INCR uses the aligned base for its next beat. FIXED must retain the
+      // original address, including its partial-beat offset, on every beat.
+      if (axi_req_i.ar.burst == axi_pkg::BURST_FIXED) begin
+        rd_meta_d.addr = addr_t'(axi_req_i.ar.addr);
+      end
       rd_meta      = rd_meta_d;
       rd_meta.addr = addr_t'(axi_req_i.ar.addr);
       rd_valid     = 1'b1;
@@ -225,7 +234,9 @@ module axi_to_detailed_mem #(
     if (w_cnt_q > '0) begin
       wr_meta_d.last = (w_cnt_q == 8'd1);
       wr_meta        = wr_meta_d;
-      wr_meta.addr   = wr_meta_q.addr + axi_pkg::num_bytes(wr_meta_q.size);
+      if (wr_meta_q.burst == axi_pkg::BURST_INCR) begin
+        wr_meta.addr = wr_meta_q.addr + axi_pkg::num_bytes(wr_meta_q.size);
+      end
       if (axi_req_i.w_valid) begin
         wr_valid = 1'b1;
         wr_meta.strb = axi_req_i.w.strb;
@@ -246,12 +257,17 @@ module axi_to_detailed_mem #(
         last:   (axi_req_i.aw.len == '0),
         qos:    axi_req_i.aw.qos,
         size:   axi_req_i.aw.size,
+        burst:  axi_req_i.aw.burst,
         write:  1'b1,
         user:   axi_req_i.aw.user,
         cache:  axi_req_i.aw.cache,
         prot:   axi_req_i.aw.prot,
         region: axi_req_i.aw.region
       };
+      // Keep the unaligned start for FIXED; WSTRB selects its valid bytes.
+      if (axi_req_i.aw.burst == axi_pkg::BURST_FIXED) begin
+        wr_meta_d.addr = addr_t'(axi_req_i.aw.addr);
+      end
       wr_meta = wr_meta_d;
       wr_meta.addr = addr_t'(axi_req_i.aw.addr);
       wr_valid = 1'b1;
@@ -495,18 +511,34 @@ module axi_to_detailed_mem #(
   );
 
   localparam NumBytesPerBank = DataWidth/NumBanks/8;
+  localparam int unsigned LaneWidth = (DataWidth > 8) ? $clog2(DataWidth/8) : 1;
+  // The exclusive end can equal the number of bytes in the entire bus word.
+  typedef logic [$clog2(DataWidth/8):0] lane_count_t;
 
   logic [NumBanks-1:0] meta_buf_bank_strb, meta_buf_size_enable;
   logic resp_b_err, resp_b_exokay, resp_r_err, resp_r_exokay;
+  logic [LaneWidth-1:0] read_first_lane;
+  lane_count_t read_end_lane, read_beat_bytes;
+
+  // Valid read bytes run from the actual address to the next size boundary,
+  // not address + size. FIXED repeats this same partial range on every beat.
+  if (DataWidth > 8) begin : gen_read_lane_offset
+    assign read_first_lane = meta_buf.addr[LaneWidth-1:0];
+  end else begin : gen_read_byte_bus
+    assign read_first_lane = '0;
+  end
+  assign read_beat_bytes = lane_count_t'(1) << meta_buf.size;
+  assign read_end_lane = (lane_count_t'(read_first_lane) & ~(read_beat_bytes - 1'b1)) +
+                        read_beat_bytes;
 
   // Collect `err` and `exokay` from all banks
   // To ensure correct propagation, `err` is grouped with `OR` and `exokay` is grouped with `AND`.
   for (genvar i = 0; i < NumBanks; i++) begin
     // Set active write banks based on strobe
     assign meta_buf_bank_strb[i] = |meta_buf.strb[i*NumBytesPerBank +: NumBytesPerBank];
-    // Set active read banks based on size and address offset: (bank.end > addr) && (bank.start < addr+size)
-    assign meta_buf_size_enable[i] = ((i*NumBytesPerBank + NumBytesPerBank) > (meta_buf.addr % (DataWidth/8))) &&
-                                     ((i*NumBytesPerBank) < ((meta_buf.addr % (DataWidth/8)) + (1<<meta_buf.size)));
+    // Only banks intersecting the valid byte range contribute read errors.
+    assign meta_buf_size_enable[i] = ((i+1)*NumBytesPerBank > read_first_lane) &&
+                                     (i*NumBytesPerBank < read_end_lane);
   end
   assign resp_b_err    = |(m2s_resp.err    &  meta_buf_bank_strb);   // Ensure only active banks are used (strobe)
   assign resp_b_exokay = &(m2s_resp.exokay | ~meta_buf_bank_strb) & meta_buf.lock;   // Ensure only active banks are used (strobe)
@@ -566,6 +598,8 @@ module axi_to_detailed_mem #(
 
   // Assertions
   // pragma translate_off
+  initial assert (DataWidth >= 8)
+    else $fatal(1, "axi_to_detailed_mem requires DataWidth >= 8 bits");
   `ifndef VERILATOR
   `ifndef XSIM
   default disable iff (!rst_ni);
@@ -585,11 +619,17 @@ module axi_to_detailed_mem #(
       axi_resp_o.b_valid && !axi_req_i.b_ready |=> $stable(axi_resp_o.b))
     else $error("B must remain stable until handshake has happened!");
   assert property (@(posedge clk_i) axi_req_i.ar_valid && axi_req_i.ar.len > 0 |->
-      axi_req_i.ar.burst == axi_pkg::BURST_INCR)
-    else $error("Non-incrementing bursts are not supported!");
+      axi_req_i.ar.burst inside {axi_pkg::BURST_INCR, axi_pkg::BURST_FIXED})
+    else $error("Only INCR and FIXED read bursts are supported!");
   assert property (@(posedge clk_i) axi_req_i.aw_valid && axi_req_i.aw.len > 0 |->
-      axi_req_i.aw.burst == axi_pkg::BURST_INCR)
-    else $error("Non-incrementing bursts are not supported!");
+      axi_req_i.aw.burst inside {axi_pkg::BURST_INCR, axi_pkg::BURST_FIXED})
+    else $error("Only INCR and FIXED write bursts are supported!");
+  assert property (@(posedge clk_i) axi_req_i.ar_valid &&
+      axi_req_i.ar.burst == axi_pkg::BURST_FIXED |-> axi_req_i.ar.len < 16)
+    else $error("FIXED read bursts must not exceed 16 beats!");
+  assert property (@(posedge clk_i) axi_req_i.aw_valid &&
+      axi_req_i.aw.burst == axi_pkg::BURST_FIXED |-> axi_req_i.aw.len < 16)
+    else $error("FIXED write bursts must not exceed 16 beats!");
   assert property (@(posedge clk_i) meta_valid && meta.atop != '0 |-> meta.write)
     else $warning("Unexpected atomic operation on read.");
   `endif

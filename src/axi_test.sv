@@ -921,6 +921,11 @@ package axi_test;
              ax_beat.ax_len = len;
           end
 
+          // FIXED bursts are limited to 16 beats, including shaped traffic.
+          if (ax_beat.ax_burst == BURST_FIXED && ax_beat.ax_len > 15) begin
+            ax_beat.ax_len = 15;
+          end
+
           rand_success = std::randomize(addr) with {
             addr >= mem_region.addr_begin;
             addr <= mem_region.addr_end;
@@ -938,6 +943,7 @@ package axi_test;
           // Randomize burst length.
           rand_success = std::randomize(len) with {
             len <= this.max_len;
+            (ax_beat.ax_burst == BURST_FIXED) -> len <= 15;
             (ax_beat.ax_burst == BURST_WRAP) ->
                 len inside {len_t'(1), len_t'(3), len_t'(7), len_t'(15)};
           }; assert(rand_success);
@@ -2033,8 +2039,9 @@ package axi_test;
       forever begin
         wait (this.aw_sample.size() > 0);
         aw_beat        = this.aw_sample.pop_front();
-        // This scoreborad only supports this type of burst:
-        assert (aw_beat.ax_burst == axi_pkg::BURST_INCR || aw_beat.ax_len == '0) else
+        // The address model supports INCR and repeated-address FIXED bursts.
+        assert ((aw_beat.ax_burst inside {axi_pkg::BURST_INCR, axi_pkg::BURST_FIXED}) ||
+                aw_beat.ax_len == '0) else
             $warning("Not supported AW burst: BURST: %0h.", aw_beat.ax_burst);
         assert (aw_beat.ax_atop == '0) else
             $warning("Atomic transfers not supported: ATOP: %0h.", aw_beat.ax_atop);
@@ -2109,8 +2116,8 @@ package axi_test;
       forever begin
         wait (this.ar_sample[id].size() > 0);
         ar_beat = this.ar_sample[id].pop_front();
-        // This scoreborad only supports this type of burst:
-        assert (ar_beat.ax_burst == axi_pkg::BURST_INCR || ar_beat.ax_len == '0) else
+        assert ((ar_beat.ax_burst inside {axi_pkg::BURST_INCR, axi_pkg::BURST_FIXED}) ||
+                ar_beat.ax_len == '0) else
             $warning("Not supported AR burst: BURST: %0h.", ar_beat.ax_burst);
 
         for (int unsigned i = 0; i <= ar_beat.ax_len; i++) begin
@@ -2120,10 +2127,11 @@ package axi_test;
               ar_beat.ax_burst, i);
           beat_address = axi_pkg::aligned_addr(beat_address, ar_beat.ax_size);
           bus_address  = axi_pkg::aligned_addr(beat_address, BUS_SIZE);
-          if(i!=0)
-            first_byte_to_check = 0;
-          else
+          // An unaligned FIXED address leaves the same prefix unused on every beat.
+          if (i == 0 || ar_beat.ax_burst == axi_pkg::BURST_FIXED)
             first_byte_to_check = ar_beat.ax_addr - beat_address;
+          else
+            first_byte_to_check = 0;
           if (!this.memory_q.exists(bus_address)) begin
             for (int unsigned j = 0; j < axi_pkg::num_bytes(BUS_SIZE); j++) begin
               this.memory_q[bus_address+j].push_back(8'bxxxxxxxx);
