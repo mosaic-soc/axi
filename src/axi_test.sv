@@ -1097,12 +1097,9 @@ package axi_test;
     // `this.drv.axi.clk_i` as `clk` argument. What is the syntax for getting an assignable
     // reference?
     task automatic rand_wait(input int unsigned min, max);
-      int unsigned rand_success, cycles;
-      rand_success = std::randomize(cycles) with {
-        cycles >= min;
-        cycles <= max;
-      };
-      assert (rand_success) else $error("Failed to randomize wait cycles!");
+      int unsigned cycles;
+      cycles = $urandom_range(min, max);
+      assert (min <= max) else $error("Failed to randomize wait cycles!");
       repeat (cycles) @(posedge this.drv.axi.clk_i);
     endtask
 
@@ -1391,12 +1388,9 @@ package axi_test;
     // TODO: The `rand_wait` task exists in `rand_verif_pkg`, but that task cannot be called with
     // `this.drv.axi.clk_i` as `clk` argument.  What is the syntax getting an assignable reference?
     task automatic rand_wait(input int unsigned min, max);
-      int unsigned rand_success, cycles;
-      rand_success = std::randomize(cycles) with {
-        cycles >= min;
-        cycles <= max;
-      };
-      assert (rand_success) else $error("Failed to randomize wait cycles!");
+      int unsigned cycles;
+      cycles = $urandom_range(min, max);
+      assert (min <= max) else $error("Failed to randomize wait cycles!");
       repeat (cycles) @(posedge this.drv.axi.clk_i);
     endtask
 
@@ -1610,12 +1604,9 @@ package axi_test;
     endfunction
 
     task automatic rand_wait(input int unsigned min, max);
-      int unsigned rand_success, cycles;
-      rand_success = std::randomize(cycles) with {
-        cycles >= min;
-        cycles <= max;
-      };
-      assert (rand_success) else $error("Failed to randomize wait cycles!");
+      int unsigned cycles;
+      cycles = $urandom_range(min, max);
+      assert (min <= max) else $error("Failed to randomize wait cycles!");
       repeat (cycles) @(posedge this.drv.axi.clk_i);
     endtask
 
@@ -1773,12 +1764,9 @@ package axi_test;
     endfunction
 
     task automatic rand_wait(input int unsigned min, max);
-      int unsigned rand_success, cycles;
-      rand_success = std::randomize(cycles) with {
-        cycles >= min;
-        cycles <= max;
-      };
-      assert (rand_success) else $error("Failed to randomize wait cycles!");
+      int unsigned cycles;
+      cycles = $urandom_range(min, max);
+      assert (min <= max) else $error("Failed to randomize wait cycles!");
       repeat (cycles) @(posedge this.drv.axi.clk_i);
     endtask
 
