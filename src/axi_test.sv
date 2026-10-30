@@ -1484,8 +1484,8 @@ package axi_test;
           rand_wait(RESP_MIN_WAIT_CYCLES, RESP_MAX_WAIT_CYCLES);
           drv.recv_w(w_beat);
           if (MAPPED) begin
-            wait (aw_queue.size() > 0);
-            aw_beat = aw_queue[0];
+            wait (aw_queue.size() > b_wait_cnt);
+            aw_beat = aw_queue[b_wait_cnt];
             byte_addr    = axi_pkg::aligned_addr(aw_beat.ax_addr, $clog2(DW/8));
 
             // Write Data if the strobe is defined
@@ -1500,7 +1500,7 @@ package axi_test;
               aw_beat.ax_addr = axi_pkg::aligned_addr(aw_beat.ax_addr, aw_beat.ax_size) +
                                     2**aw_beat.ax_size;
             end
-            aw_queue[0] = aw_beat;
+            aw_queue[b_wait_cnt] = aw_beat;
           end
           if (w_beat.w_last)
             break;
@@ -1516,6 +1516,7 @@ package axi_test;
         automatic logic rand_success;
         wait (b_wait_cnt > 0 && (aw_queue.size() != 0));
         aw_beat = aw_queue.pop_front();
+        b_wait_cnt--;
 `ifdef XSIM
         // std::randomize(b_beat) may behave differently to b_beat.randomize() wrt. limited ranges
         // Keeping alternate implementation for XSIM only
@@ -1534,7 +1535,6 @@ package axi_test;
           b_beat.b_resp = axi_pkg::RESP_OKAY;
         end
         drv.send_b(b_beat);
-        b_wait_cnt--;
       end
     endtask
 
